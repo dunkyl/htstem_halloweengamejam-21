@@ -2,11 +2,11 @@ use ggez::conf;
 use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 use ggez::graphics::{self, Color};
 use ggez::{Context, ContextBuilder, GameResult};
-use ggez::audio::{SoundSource, Source};
+use ggez::audio::Source;
 use glam::*;
 use oorandom::Rand32;
 
-use std::{env, option};
+use std::env;
 use std::path;
 
 
@@ -17,7 +17,7 @@ enum LR {
 }
 
 impl LR {
-    fn to_f32(&self) -> f32 {
+    fn to_f32(self) -> f32 {
         match self {
             LR::Left => -1.0,
             LR::Right => 1.0
@@ -110,7 +110,7 @@ fn get_rank(score: u32, health: i32) -> std::string::String {
             "A"
         } else if rankscore < 1.4 {
             "S"
-        } else if rankscore < 1.4 {
+        } else if rankscore < 1.5 {
             "SS"
         } else {
             "SS+"
@@ -261,21 +261,11 @@ struct Assets {
     lifebar_bg: SpriteFrame,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ControllerState {
     left: bool,
     right: bool
 }
-
-impl Default for ControllerState {
-    fn default() -> Self {
-        ControllerState {
-            left: false,
-            right: false
-        }
-    }
-}
-
 
 struct MainState {
     player: Player,
@@ -437,11 +427,11 @@ impl EventHandler<ggez::GameError> for MainState {
                     }
                 }).collect();
 
-            self.candies = self.candies.iter().filter(|candy| !candy.is_collected).copied().collect();
+            self.candies.retain(|candy| !candy.is_collected);
 
             if self.player.life <= 0 {
                 println!("Game over!");
-                let _ = event::quit(ctx);
+                event::quit(ctx);
             }
         }
 
@@ -588,7 +578,7 @@ pub fn main() -> GameResult {
     let lifebar = graphics::Image::new(&mut ctx, "/lifebar.png")?;
     let lifebar_bg = graphics::Image::new(&mut ctx, "/lifebar_bg.png")?;
 
-    let mut assets: Assets = Assets {
+    let assets: Assets = Assets {
         player,
         bg,
         candy,
