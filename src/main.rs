@@ -37,6 +37,7 @@ struct Player {
     animation_frame: f32,
     bbox_size: f32,
     life: i32,
+    grounded: bool
 }
 
 impl Draw for Player {
@@ -188,7 +189,7 @@ const PLAYER_LIFE: i32 = 12;
 
 
 /// Acceleration in pixels per second.
-const PLAYER_THRUST: f32 = 300.0;
+const PLAYER_THRUST: f32 = 600.0;
 const PLAYER_BREAK_THRUST: f32 = PLAYER_THRUST * 3.0;
 const GRAVITY: f32 = 200.0;
 
@@ -221,7 +222,7 @@ fn player_handle_input(actor: &mut Player, input: &ControllerState, dt: f32) {
         };
     
     let thrust =
-        if target_vel == 0.0 || actor.velocity.x.signum() != target_vel.signum(){
+        if (target_vel == 0.0 && actor.grounded) || actor.velocity.x.signum() != target_vel.signum(){
             PLAYER_BREAK_THRUST * dt * thrust_sign
         } else{
             PLAYER_THRUST * dt * thrust_sign
@@ -234,11 +235,25 @@ fn player_handle_input(actor: &mut Player, input: &ControllerState, dt: f32) {
     } else {
         actor.velocity.x + thrust
     };
+
+    if input.up && actor.grounded {
+        actor.velocity.y = 400.0
+    }
 }
 
 fn update_player_position(actor: &mut Player, dt: f32) {
     let dv = actor.velocity * dt;
     actor.pos += dv;
+    if !actor.grounded {
+        actor.velocity.y -= GRAVITY * dt * 5.0;
+    }
+    if actor.pos.y <= -192.0 {
+        actor.pos.y = -192.0;
+        actor.grounded = true;
+    } else {
+        actor.grounded = false;
+    }
+    
 }
 
 fn world_to_screen_coords(screen_width: f32, screen_height: f32, point: Vec2) -> Vec2 {
@@ -264,7 +279,9 @@ struct Assets {
 #[derive(Debug, Default)]
 struct ControllerState {
     left: bool,
-    right: bool
+    right: bool,
+    up: bool,
+    down: bool
 }
 
 struct MainState {
@@ -303,6 +320,7 @@ impl MainState {
             animation_frame: 0.0,
             bbox_size: 10.0,
             life: PLAYER_LIFE,
+            grounded: true
         };
         let candies = Vec::new();
 
@@ -349,13 +367,13 @@ fn print_instructions() {
     println!();
 }
 
-const DIFFICULTY_RATE: f32 = 0.15;
+const DIFFICULTY_RATE: f32 = 1.15;
 
 impl EventHandler<ggez::GameError> for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         const DESIRED_FPS: u32 = 120;
 
-        while ggez::timer::check_update_time(ctx, DESIRED_FPS) {
+        if ggez::timer::check_update_time(ctx, DESIRED_FPS) {
             let seconds = 1.0 / (DESIRED_FPS as f32);
 
             self.difficulty += seconds * DIFFICULTY_RATE;
@@ -389,13 +407,16 @@ impl EventHandler<ggez::GameError> for MainState {
             update_player_position(&mut self.player, seconds);
             if self.player.pos.x.abs() > self.screen_width / 2.0 {
                 self.player.pos.x = self.screen_width / 2.0 * self.player.pos.x.signum();
-                self.player.velocity.x = 0.0;
+                self.player.velocity.x = -self.player.velocity.x * 0.9;
+                if self.player.grounded {
+                    self.player.velocity.x *= 0.4;
+                }
             }
 
 
             for candy in &mut self.candies {
-                candy.velocity.y -= GRAVITY * seconds;
                 candy.pos += candy.velocity * seconds;
+                candy.velocity.y -= GRAVITY * seconds;
             }
 
             for candy in &mut self.candies {
@@ -431,7 +452,7 @@ impl EventHandler<ggez::GameError> for MainState {
 
             if self.player.life <= 0 {
                 println!("Game over!");
-                event::quit(ctx);
+                // event::quit(ctx);
             }
         }
 
@@ -508,6 +529,8 @@ impl EventHandler<ggez::GameError> for MainState {
             KeyCode::Right => {
                 self.input.right = true;
             }
+            KeyCode::Up => self.input.up = true,
+            KeyCode::Down => self.input.down = true,
             KeyCode::P => {
                 let img = graphics::screenshot(ctx).expect("Could not take screenshot");
                 img.encode(ctx, graphics::ImageFormat::Png, "/screenshot.png")
@@ -526,6 +549,8 @@ impl EventHandler<ggez::GameError> for MainState {
             KeyCode::Right => {
                 self.input.right = false;
             }
+            KeyCode::Up => self.input.up = false,
+            KeyCode::Down => self.input.down = false,
             _ => (), 
         }
     }
