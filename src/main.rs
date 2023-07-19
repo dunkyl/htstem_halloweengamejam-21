@@ -89,12 +89,6 @@ impl Draw for Candy {
 
 type SpriteFrame = graphics::Image;
 
-struct Stage<const W: usize, const H: usize> {
-    block_palette: Arc<Vec<SpriteFrame>>,
-    blocks: [[Option<usize>; H]; W],
-    background: SpriteFrame,
-}
-
 fn get_rank(score: u32, health: i32) -> std::string::String {
     (if score == 0 && health == PLAYER_LIFE {
         "-"
@@ -122,34 +116,6 @@ fn get_rank(score: u32, health: i32) -> std::string::String {
         }
     }).to_string()
     
-}
-
-impl<const W: usize, const H: usize> Draw for Stage<W, H> {
-    fn draw(&self, _assets: &mut Assets, ctx: &mut Context, world_coords: (f32, f32)) -> GameResult {
-        let (screen_w, screen_h) = world_coords;
-        // let pos = world_to_screen_coords(screen_w, screen_h, self.pos);
-
-        let image = &self.background;
-        let drawparams = graphics::DrawParam::new()
-            .dest(Vec2::new(0.0, 0.0));
-        graphics::draw(ctx, image, drawparams)?;
-
-        for x in 0..W {
-            for y in 0..H {
-                if let Some(block_id) = self.blocks[x][y] {
-                    let pos = world_to_screen_coords(screen_w, screen_h, Vec2::new(
-                        (x as f32 - W as f32 / 2.0) * 32.0, 
-                        (y as f32- H as f32 / 2.0) * -32.0));
-
-                    let image = &self.block_palette[block_id];
-                    let drawparams = graphics::DrawParam::new()
-                        .dest(pos);
-                    graphics::draw(ctx, image, drawparams)?;
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 use std::sync::Arc;
@@ -244,7 +210,8 @@ fn player_handle_input(actor: &mut Player, input: &ControllerState, dt: f32) {
     };
 
     if input.up && actor.grounded {
-        actor.velocity.y = 400.0
+        actor.velocity.y = 400.0;
+        actor.grounded = false;
     }
 }
 
@@ -253,10 +220,14 @@ fn update_player_position(actor: &mut Player, dt: f32) {
     actor.pos += dv;
     if !actor.grounded {
         actor.velocity.y -= GRAVITY * dt * 5.0;
+    } else {
+        actor.velocity.y = 0.0;
     }
-    if actor.pos.y <= -178.0 {
-        actor.pos.y = -178.0;
+    if actor.pos.y <= -162.0 {
+        actor.pos.y = -162.0;
         actor.grounded = true;
+        actor.velocity.x += f32::min(actor.velocity.y.abs(), actor.velocity.x.abs()) * actor.velocity.x.signum() * 0.5;
+        actor.velocity.y = 0.0;
     } else {
         actor.grounded = false;
     }
@@ -278,7 +249,6 @@ struct Assets {
     font: graphics::Font,
     collect_animation: Sprite,
     bgm: Source,
-    bg_palette: Arc<Vec<SpriteFrame>>,
     lifebar: SpriteFrame,
     lifebar_bg: SpriteFrame,
 }
@@ -294,8 +264,8 @@ struct ControllerState {
 struct MainState {
     player: Player,
     candies: Vec<Candy>,
-    stage: Stage<20, 15>,
     score: u32,
+    combo: u32,
     assets: Assets,
     screen_width: f32,
     screen_height: f32,
@@ -308,7 +278,7 @@ struct MainState {
 }
 
 impl MainState {
-    fn new(ctx: &mut Context, assets: Assets, map: (Vec<Vec<usize>>, TileSet)) -> GameResult<MainState> {
+    fn new(ctx: &mut Context, assets: Assets, mut map: (Vec<Vec<usize>>, TileSet)) -> GameResult<MainState> {
         println!("Game resource path: {:?}", ctx.filesystem);
 
         print_instructions();
@@ -331,19 +301,12 @@ impl MainState {
             grounded: true
         };
         let candies = Vec::new();
-
-        let mut stage = Stage { blocks: [[None; 15]; 20], block_palette: assets.bg_palette.clone(), background: assets.bg.clone()};
-
-        for x in 0..20 {
-            stage.blocks[x][14] = Some(0);
-        }
-
         
         let s = MainState {
             player,
             candies,
-            stage,
             score: 0,
+            combo: 0,
             assets,
             screen_width: width,
             screen_height: height,
@@ -431,7 +394,8 @@ impl EventHandler<ggez::GameError> for MainState {
             for candy in &mut self.candies {
                 let pdistance = candy.pos - self.player.pos;
                 if pdistance.length() < (self.player.bbox_size + candy.bbox_size) {
-                    self.score += 1;
+                    self.combo += 1;
+                    self.score += self.combo;
                     candy.is_collected = true;
                     self.particles.push(Particle {
                         pos: Vec2::new(self.player.pos.x, self.player.pos.y+16.0),
@@ -444,7 +408,7 @@ impl EventHandler<ggez::GameError> for MainState {
                 else if candy.pos.y < self.screen_height * -0.5 {
                     self.player.life -= 1;
                     candy.is_collected = true;
-                    
+                    self.combo = 0;
                 }
             }
 
@@ -487,20 +451,71 @@ impl EventHandler<ggez::GameError> for MainState {
                 graphics::DrawParam::new().dest(vec2(0.0, 0.0))
             )?;
 
+            let sample_tile = |m: &Vec<Vec<_>>, x: i32, y: i32| {
+                if !(0..20).contains(&x) || !(0..15).contains(&y) {
+                    0usize
+                } else {
+                    m[14-(y as usize)][x as usize]
+                }
+            };
 
-            for x in 0..40 {
-                for y in 0..30 {
-                    let tile = self.map.0[y][x];
+            for x in 0i32..20 {
+                for y in 0i32..15 {
+                    let tile = sample_tile(&self.map.0, x, y);
                     if tile != 0 {
-                        let tile = tile as f32;
-                        let params = graphics::DrawParam::new()
-                            // .offset(vec2(0.5, 0.5))
-                            .dest(vec2(x as f32 * 16.0, y as f32 * 16.0))
-                            .src(graphics::Rect { x: (tile) / 15.0, y: 0.0, w: 1.0 / 15.0, h: 1.0 });
-                        graphics::draw(ctx, &self.map.1.img(), params)?;
+                        for sub_x in 0..2 {
+                            for sub_y in 0..2 {
+                                let rightfill = sub_x == 0 || sample_tile(&self.map.0, x+1, y) != 0;
+                                let leftfill = sub_x == 1 || sample_tile(&self.map.0, x-1, y) != 0;
+                                let up_fill = sub_y == 1 || sample_tile(&self.map.0, x, y-1) != 0;
+                                let down_fill = sub_y == 0 || sample_tile(&self.map.0, x, y+1) != 0;
+
+                                let up_up_fill = sample_tile(&self.map.0, x, y-1) != 0;
+
+                                let mut tile_id = 7.0;
+                                
+                                if !rightfill && !up_fill {
+                                    tile_id = 2.0;
+                                }
+                                if !leftfill && !up_fill {
+                                    tile_id = 1.0;
+                                }
+                                if leftfill && rightfill && up_fill {
+                                    tile_id = 9.0;
+                                }
+                                if up_up_fill {
+                                    tile_id = 12.0;
+                                }
+                                if !leftfill && rightfill && up_fill {
+                                    tile_id = 5.0;
+                                }
+                                if leftfill && !rightfill && up_fill {
+                                    tile_id = 6.0;
+                                }
+                                if !leftfill && rightfill && up_fill && up_up_fill {
+                                    tile_id = 10.0;
+                                }
+                                if leftfill && !rightfill && up_fill && up_up_fill {
+                                    tile_id = 11.0;
+                                }
+                                if !down_fill {
+                                    tile_id = 8.0;
+                                }
+                                if !down_fill && !leftfill {
+                                    tile_id = 3.0;
+                                }
+                                if !down_fill && !rightfill {
+                                    tile_id = 4.0;
+                                }
+
+                                let params = graphics::DrawParam::new()
+                                    // .offset(vec2(0.5, 0.5))
+                                    .dest(vec2((2*x+sub_x) as f32 * 16.0, (2*y+sub_y) as f32 * 16.0))
+                                    .src(graphics::Rect { x: tile_id / 15.0, y: 0.0, w: 1.0 / 15.0, h: 1.0 });
+                                graphics::draw(ctx, &self.map.1.img(), params)?;
+                            }
+                        }
                     }
-                    
-                    
                 }
             }
 
@@ -604,7 +619,7 @@ pub fn main() -> GameResult {
 
     let cb = ContextBuilder::new("pogin", "dunkyl")
         .window_setup(conf::WindowSetup::default().title("Pogin!"))
-        .window_mode(conf::WindowMode::default().dimensions(640.0, 480.0))
+        .window_mode(conf::WindowMode::default().dimensions(720.0, 480.0))
         .add_resource_path(resource_dir);
 
     let (mut ctx, events_loop) = cb.build()?;
@@ -636,24 +651,20 @@ pub fn main() -> GameResult {
         ]
     );
 
-    let test_map =
-        (0..27).map(|_| (0..40).map(|_| 0usize).collect::<Vec<_>>())
-        .chain(
-            (0..1).map(|_| (0..40).map(|_| 7).collect::<Vec<_>>())
-        )
-        .chain(
-            (0..1).map(|_| (0..40).map(|_| 9).collect::<Vec<_>>())
-        )
-        .chain(
-            (0..1).map(|_| (0..40).map(|_| 12).collect::<Vec<_>>())
-        )
+    let mut test_map =
+        (0..15).map(|_| (0..20).map(|_| 0usize).collect::<Vec<_>>())
         .collect::<Vec<_>>();
+
+    for i in 0..20 {
+        test_map[0][i] = 1;
+        test_map[1][i] = 1;
+    }
 
     let player = Sprite { 
         frames: Arc::new(vec![
             graphics::Image::new(&mut ctx, "/cat1.png")?,
             graphics::Image::new(&mut ctx, "/cat2.png")?])};
-    let bg = graphics::Image::new(&mut ctx, "/bg.png")?;
+    let bg = graphics::Image::new(&mut ctx, "/bg2.png")?;
     let candy = graphics::Image::new(&mut ctx, "/candy_a.png")?;
     let font = graphics::Font::new(&mut ctx, "/Minecraftia.ttf")?;
     
@@ -668,9 +679,6 @@ pub fn main() -> GameResult {
     };
     let bgm = Source::new(&mut ctx, "/c.mp3")?;
 
-    let bg_palette = Arc::new(vec![
-        graphics::Image::new(&mut ctx, "/ground.png")?,
-    ]);
 
     let lifebar = graphics::Image::new(&mut ctx, "/lifebar.png")?;
     let lifebar_bg = graphics::Image::new(&mut ctx, "/lifebar_bg.png")?;
@@ -682,7 +690,6 @@ pub fn main() -> GameResult {
         font,
         collect_animation,
         bgm,
-        bg_palette,
         lifebar,
         lifebar_bg
     };
