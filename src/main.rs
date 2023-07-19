@@ -1,3 +1,4 @@
+#![allow(clippy::unusual_byte_groupings)]
 use ggez::conf;
 use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 use ggez::graphics::{self, Color};
@@ -5,9 +6,12 @@ use ggez::{Context, ContextBuilder, GameResult};
 use ggez::audio::Source;
 use glam::*;
 use oorandom::Rand32;
+use tileset::TileSet;
 
 use std::env;
 use std::path;
+
+mod tileset;
 
 
 #[derive(Debug, Clone, Copy)]
@@ -159,12 +163,15 @@ struct Sprite {
 struct Particle {
     sprite: Sprite,
     pos: Vec2,
+    vel: Vec2,
     animation_frame: f32,
 }
 
 impl Particle {
     fn update(&mut self, dt: f32) -> bool {
         self.animation_frame += dt * 30.0;
+        self.pos += self.vel * dt;
+        self.vel.y -= GRAVITY * dt;
         // keep if:
         (self.animation_frame.floor() as usize) < self.sprite.frames.len()
     }
@@ -247,8 +254,8 @@ fn update_player_position(actor: &mut Player, dt: f32) {
     if !actor.grounded {
         actor.velocity.y -= GRAVITY * dt * 5.0;
     }
-    if actor.pos.y <= -192.0 {
-        actor.pos.y = -192.0;
+    if actor.pos.y <= -178.0 {
+        actor.pos.y = -178.0;
         actor.grounded = true;
     } else {
         actor.grounded = false;
@@ -297,10 +304,11 @@ struct MainState {
     particles: Vec<Particle>,
     difficulty: f32,
     is_first_frame: bool,
+    map: (Vec<Vec<usize>>, TileSet)
 }
 
 impl MainState {
-    fn new(ctx: &mut Context, assets: Assets) -> GameResult<MainState> {
+    fn new(ctx: &mut Context, assets: Assets, map: (Vec<Vec<usize>>, TileSet)) -> GameResult<MainState> {
         println!("Game resource path: {:?}", ctx.filesystem);
 
         print_instructions();
@@ -343,7 +351,8 @@ impl MainState {
             rng,
             particles: Vec::new(),
             difficulty: 0.0,
-            is_first_frame: true
+            is_first_frame: true,
+            map
         };
 
         Ok(s)
@@ -371,13 +380,13 @@ const DIFFICULTY_RATE: f32 = 1.15;
 
 impl EventHandler<ggez::GameError> for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        const DESIRED_FPS: u32 = 120;
+        const DESIRED_FPS: u32 = 60;
 
-        if ggez::timer::check_update_time(ctx, DESIRED_FPS) {
+        while ggez::timer::check_update_time(ctx, DESIRED_FPS) {
             let seconds = 1.0 / (DESIRED_FPS as f32);
 
             self.difficulty += seconds * DIFFICULTY_RATE;
-            let rate = (seconds + 1.0) * 0.001;
+            let rate = (seconds + 1.0) * 0.005;
             if self.rng.rand_float() < rate || self.is_first_frame {
                 self.is_first_frame = false;
 
@@ -429,6 +438,7 @@ impl EventHandler<ggez::GameError> for MainState {
                         // velocity: Vec2::new(0.0, 0.0),
                         animation_frame: 0.0,
                         sprite: self.assets.collect_animation.clone(),
+                        vel: self.player.velocity
                     });
                 }
                 else if candy.pos.y < self.screen_height * -0.5 {
@@ -452,7 +462,7 @@ impl EventHandler<ggez::GameError> for MainState {
 
             if self.player.life <= 0 {
                 println!("Game over!");
-                // event::quit(ctx);
+                event::quit(ctx);
             }
         }
 
@@ -470,7 +480,31 @@ impl EventHandler<ggez::GameError> for MainState {
             let assets = &mut self.assets;
             let coords = (self.screen_width, self.screen_height);
 
-            self.stage.draw(assets, ctx, coords)?;
+            // let bottom_left = vec2(-coords.0 / 2.0, -coords.1 / 2.0);
+
+            graphics::draw(
+                ctx, &assets.bg,
+                graphics::DrawParam::new().dest(vec2(0.0, 0.0))
+            )?;
+
+
+            for x in 0..40 {
+                for y in 0..30 {
+                    let tile = self.map.0[y][x];
+                    if tile != 0 {
+                        let tile = tile as f32;
+                        let params = graphics::DrawParam::new()
+                            // .offset(vec2(0.5, 0.5))
+                            .dest(vec2(x as f32 * 16.0, y as f32 * 16.0))
+                            .src(graphics::Rect { x: (tile) / 15.0, y: 0.0, w: 1.0 / 15.0, h: 1.0 });
+                        graphics::draw(ctx, &self.map.1.img(), params)?;
+                    }
+                    
+                    
+                }
+            }
+
+            // self.stage.draw(assets, ctx, coords)?;
 
             for candy in self.candies.iter() {
                 candy.draw(assets, ctx, coords)?;
@@ -575,7 +609,45 @@ pub fn main() -> GameResult {
 
     let (mut ctx, events_loop) = cb.build()?;
 
+    const UP:    IVec2 = ivec2( 0,  1);
+    const DOWN:  IVec2 = ivec2( 0, -1);
+    const LEFT:  IVec2 = ivec2(-1,  0);
+    const RIGHT: IVec2 = ivec2( 1,  0);
 
+    let grass_tiles = tileset::TileSet::new(
+        &mut ctx,
+        "/ground2.png",
+        vec![
+            vec![ivec2(0, 0)],
+            vec![UP, LEFT],
+            vec![UP, RIGHT],
+            vec![DOWN, LEFT],
+            vec![DOWN, RIGHT],
+            vec![UP+UP, LEFT],
+            vec![UP+UP, RIGHT],
+            vec![UP],
+            vec![DOWN],
+            vec![UP+UP],
+            vec![LEFT],
+            vec![RIGHT],
+            vec![],
+            vec![UP+RIGHT],
+            vec![UP+LEFT],
+        ]
+    );
+
+    let test_map =
+        (0..27).map(|_| (0..40).map(|_| 0usize).collect::<Vec<_>>())
+        .chain(
+            (0..1).map(|_| (0..40).map(|_| 7).collect::<Vec<_>>())
+        )
+        .chain(
+            (0..1).map(|_| (0..40).map(|_| 9).collect::<Vec<_>>())
+        )
+        .chain(
+            (0..1).map(|_| (0..40).map(|_| 12).collect::<Vec<_>>())
+        )
+        .collect::<Vec<_>>();
 
     let player = Sprite { 
         frames: Arc::new(vec![
@@ -616,6 +688,6 @@ pub fn main() -> GameResult {
     };
 
     // let _ = assets.bgm.play(&mut ctx)?;
-    let game = MainState::new(&mut ctx, assets)?;
+    let game = MainState::new(&mut ctx, assets, (test_map, grass_tiles))?;
     event::run(ctx, events_loop, game)
 }
