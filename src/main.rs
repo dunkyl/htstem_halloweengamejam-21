@@ -11,7 +11,15 @@ use tileset::TileSet;
 use std::env;
 use std::path;
 
+mod sprite;
 mod tileset;
+mod physical;
+
+use lazy_static;
+
+lazy_static::lazy_static! {
+
+}
 
 
 #[derive(Debug, Clone, Copy)]
@@ -34,6 +42,7 @@ trait Draw {
 }
 
 struct Player {
+    sprite: sprite::Sprite,
     pos: Vec2,
     velocity: Vec2,
     last_velocity: Vec2,
@@ -46,15 +55,17 @@ struct Player {
 
 impl Draw for Player {
     fn draw(&self, assets: &mut Assets, ctx: &mut Context, world_coords: (f32, f32)) -> GameResult {
-        let (screen_w, screen_h) = world_coords;
-        let pos = world_to_screen_coords(screen_w, screen_h, self.pos);
-        let frame = if self.velocity.x == 0.0 { 0 } else { self.animation_frame.floor() as usize };
-        let image = &assets.player.frames[frame];
-        let drawparams = graphics::DrawParam::new()
-            .dest(pos)
-            .offset(Vec2::new(0.5, 0.5))
-            .scale([-self.facing.to_f32()*1.0, 1.0]);
-        graphics::draw(ctx, image, drawparams)
+        // let (screen_w, screen_h) = world_coords;
+        // let pos = world_to_screen_coords(screen_w, screen_h, self.pos);
+        // let frame = if self.velocity.x == 0.0 { 0 } else { self.animation_frame.floor() as usize };
+        // let image = &assets.player.frames[frame];
+        // let drawparams = graphics::DrawParam::new()
+        //     .dest(pos)
+        //     .offset(Vec2::new(0.5, 0.5))
+        //     .scale([-self.facing.to_f32()*1.0, 1.0]);
+        // graphics::draw(ctx, image, drawparams)?;
+        
+        self.sprite.draw_frame(ctx, self.animation_frame.floor() as usize)
     }
 }
 
@@ -175,15 +186,16 @@ fn player_handle_input(actor: &mut Player, input: &ControllerState, dt: f32) {
 
     if actor.velocity.x != 0.0 {
         if actor.last_velocity.x == 0.0 {
-            actor.animation_frame += 0.5;
+            actor.animation_frame += 0.99;
         }
-        actor.animation_frame = (actor.animation_frame + 0.2 * actor.velocity.x.abs() / PLAYER_VEL) % 2.0;
+        actor.animation_frame = (actor.animation_frame + 0.2 * actor.velocity.x.abs() / PLAYER_VEL) % 4.0;
     }
     else {
         actor.animation_frame = 0.0;
     }
 
     actor.facing = facing;
+    actor.sprite.scale.x = -facing.to_f32();
     let target_vel = target_vel * PLAYER_VEL;
     let thrust_sign =
         if actor.velocity.x < target_vel {
@@ -213,6 +225,9 @@ fn player_handle_input(actor: &mut Player, input: &ControllerState, dt: f32) {
         actor.velocity.y = 400.0;
         actor.grounded = false;
     }
+
+    actor.sprite.pos.x = actor.pos.x + 320.0;
+    actor.sprite.pos.y = -actor.pos.y + 240.0;
 }
 
 fn update_player_position(actor: &mut Player, dt: f32) {
@@ -248,9 +263,10 @@ struct Assets {
     candy: SpriteFrame,
     font: graphics::Font,
     collect_animation: Sprite,
-    bgm: Source,
+    // bgm: Source,
     lifebar: SpriteFrame,
     lifebar_bg: SpriteFrame,
+    collect_sheet: sprite::SpriteSheet,
 }
 
 #[derive(Debug, Default)]
@@ -289,8 +305,13 @@ impl MainState {
         let seed = 0;
         let rng = Rand32::new(seed);
 
+        let cat_sheet = sprite::SpriteSheet::new(
+            graphics::Image::new(ctx, "/cat.png")?, 4, 1
+        );
+
         // let assets = Assets::new(ctx)?;
         let player = Player {
+            sprite: cat_sheet.sprite(Vec2::new(0.0, 0.0)),
             pos: Vec2::new(0.0, -height/ 2.0 + 32.0 + 16.0),
             velocity: Vec2::new(0.0, 0.0),
             last_velocity: Vec2::new(0.0, 0.0),
@@ -531,7 +552,8 @@ impl EventHandler<ggez::GameError> for MainState {
 
             //let p = &self.player as &dyn Draw;
 
-            self.player.draw(assets, ctx, coords)?;
+            // self.player.draw(assets, ctx, coords)?;
+            self.player.sprite.draw_frame(ctx, self.player.animation_frame.floor() as usize)?;
 
         }
 
@@ -619,7 +641,7 @@ pub fn main() -> GameResult {
 
     let cb = ContextBuilder::new("pogin", "dunkyl")
         .window_setup(conf::WindowSetup::default().title("Pogin!"))
-        .window_mode(conf::WindowMode::default().dimensions(720.0, 480.0))
+        .window_mode(conf::WindowMode::default().dimensions(640.0, 480.0))
         .add_resource_path(resource_dir);
 
     let (mut ctx, events_loop) = cb.build()?;
@@ -660,6 +682,12 @@ pub fn main() -> GameResult {
         test_map[1][i] = 1;
     }
 
+    
+
+    let collect_sheet = sprite::SpriteSheet::new(
+        graphics::Image::new(&mut ctx, "/collect.png")?, 6, 1
+    );
+
     let player = Sprite { 
         frames: Arc::new(vec![
             graphics::Image::new(&mut ctx, "/cat1.png")?,
@@ -677,7 +705,7 @@ pub fn main() -> GameResult {
             graphics::Image::new(&mut ctx, "/collect5.png")?,
         ])
     };
-    let bgm = Source::new(&mut ctx, "/c.mp3")?;
+    // let bgm = Source::new(&mut ctx, "/c.mp3")?;
 
 
     let lifebar = graphics::Image::new(&mut ctx, "/lifebar.png")?;
@@ -689,9 +717,10 @@ pub fn main() -> GameResult {
         candy,
         font,
         collect_animation,
-        bgm,
+        // bgm,
         lifebar,
-        lifebar_bg
+        lifebar_bg,
+        collect_sheet
     };
 
     // let _ = assets.bgm.play(&mut ctx)?;

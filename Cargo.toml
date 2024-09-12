@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 ggez = "0.6.1"
 glam = { version = "0.24.1", features = ["mint"]}
+lazy_static = "1.4.0"
 # Has to be the same version of mint that our math lib uses here.
 mint = "0.5"
 oorandom = "11.1.3"
